@@ -1,0 +1,16 @@
+{
+  "description": "Report per-turn stats: speed, tokens, cache hit rate, tool time and cost.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${PLUGIN_ROOT}/hooks/turn_stats.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

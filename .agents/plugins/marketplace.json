@@ -1,0 +1,16 @@
+{
+  "name": "codex-turn-stats",
+  "interface": {
+    "displayName": "Turn Stats"
+  },
+  "plugins": [
+    {
+      "name": "turn-stats",
+      "source": {
+        "source": "local",
+        "path": "./plugins/turn-stats"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "turn-stats",
+  "version": "1.0.0",
+  "description": "Report generation speed, token counts, prompt-cache hit rate, tool time and estimated cost after each Codex turn.",
+  "keywords": ["stats", "tps", "tokens-per-second", "cache", "cost", "hooks"],
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Turn Stats",
+    "shortDescription": "Per-turn speed, cache hit rate, tool time and cost",
+    "longDescription": "Adds a one-line summary after every agent turn: generation speed in tokens per second, output token count, share of reasoning tokens, prompt-cache hit rate, tool call count and time, and the estimated API cost in USD. Every segment can be switched off individually.",
+    "developerName": "yuehui.xu",
+    "category": "Productivity"
+  }
+}

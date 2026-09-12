@@ -1,0 +1,9 @@
+{
+  "tps": true,
+  "output_tokens": true,
+  "reasoning_share": true,
+  "cache_hit": true,
+  "tools": true,
+  "cost": true,
+  "fast_multiplier": 2.0
+}
