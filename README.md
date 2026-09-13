@@ -95,7 +95,15 @@ edit the copy, never a file inside the plugin.
   "cache_hit": true,
   "tools": true,
   "cost": true,
-  "fast_multiplier": 2.0
+  "fast_multiplier": 2.0,
+  "model_rates": {
+    "gpt-5.6-luna": {
+      "input": 0.2,
+      "cached_input": 0.02,
+      "cache_write": 0.25,
+      "output": 1.2
+    }
+  }
 }
 ```
 
@@ -108,6 +116,7 @@ edit the copy, never a file inside the plugin.
 | `tools` | Tool call count and time | `Tools 7 3.2s` |
 | `cost` | Estimated API cost | `$0.0592` |
 | `fast_multiplier` | Cost multiplier on the Fast service tier | `2.0` |
+| `model_rates` | Per-model USD per million token rates; entries override or extend the defaults | `{ "gpt-5.5": { ... } }` |
 
 Notes:
 
@@ -116,6 +125,12 @@ Notes:
 - `reasoning_share` renders on its own as `reasoning 71%` when `output_tokens`
   is off, so the switch is never inert.
 - `fast_multiplier` scales the cost when the turn ran on the Fast service tier.
+- `model_rates` uses `input`, `cached_input`, `cache_write`, and `output` rates in
+  USD per million tokens. Model keys are matched case-insensitively as substrings,
+  with the longest matching key taking precedence. The repository template includes
+  the built-in defaults; add or override entries in the data-directory copy. A new
+  model entry must provide all four rates, while an existing entry may override only
+  the fields that changed.
 
 ## How the numbers are computed
 
@@ -145,9 +160,10 @@ Prices per million tokens, matched against the model id:
 
 **These are estimates, not billed amounts.** They come from third-party
 listings rather than a first-party feed, they drift as prices change, and they
-ignore any discount, credit or enterprise agreement on your account. Edit
-`MODEL_RATES` in `hooks/turn_stats.py` to match your own rates. A model with no
-matching entry reports no cost at all rather than guessing.
+ignore any discount, credit or enterprise agreement on your account. Add or
+override entries in `model_rates` in the persistent data-directory copy of
+`turn_stats.json`; do not edit the plugin script. A model with no matching entry
+reports no cost at all rather than guessing.
 
 ## Known limitations
 

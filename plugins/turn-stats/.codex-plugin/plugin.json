@@ -1,6 +1,6 @@
 {
   "name": "turn-stats",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Report generation speed, token counts, prompt-cache hit rate, tool time and estimated cost after each Codex turn.",
   "keywords": ["stats", "tps", "tokens-per-second", "cache", "cost", "hooks"],
   "hooks": "./hooks/hooks.json",

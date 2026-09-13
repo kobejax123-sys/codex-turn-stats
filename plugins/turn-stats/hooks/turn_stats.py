@@ -14,6 +14,7 @@ clean no-op.
 """
 
 import json
+import math
 import os
 import sys
 
@@ -24,8 +25,18 @@ import sys
 # denominator too, or turns that compact report a rate that is too high.
 GEN_ITEM_TYPES = {"Reasoning", "AgentMessage", "Plan", "ContextCompaction"}
 
-# Items for a tool the model invoked, rather than model output.
-TOOL_ITEM_TYPES = {"CommandExecution", "McpToolCall", "FileChange", "Extension"}
+# Items for a tool the model invoked, rather than model output. Subagent activity is
+# intentionally excluded: this plugin reports the current turn, not child-agent turns.
+TOOL_ITEM_TYPES = {
+    "CommandExecution",
+    "DynamicToolCall",
+    "Extension",
+    "FileChange",
+    "ImageGeneration",
+    "ImageView",
+    "McpToolCall",
+    "WebSearch",
+}
 
 # Items that do not stream arrive as a single chunk: their window spans a few
 # milliseconds while the turn still reports a full token count. Below this the
@@ -50,15 +61,17 @@ DEFAULT_SHOW = {
 # Fast buys roughly 2.5x the processing speed for 2x the money.
 DEFAULT_FAST_MULTIPLIER = 2.0
 
-# USD per million tokens, matching the model id as a substring. Prices move, so
-# check https://openai.com/api/pricing/ before trusting these for real budgeting.
-# Cached input bills at 10% of the input rate; cache writes at 1.25x.
+# Built-in USD per million token defaults, matching the model id as a substring. Users
+# can override or extend these in the durable `model_rates` config section below.
+# Prices move, so check https://openai.com/api/pricing/ before trusting these for real
+# budgeting. Cached input bills at 10% of the input rate; cache writes at 1.25x.
 MODEL_RATES = {
     "gpt-5.6-sol": {"input": 4.00, "cached_input": 0.40, "cache_write": 5.00, "output": 20.00},
     "gpt-5.6-terra": {"input": 2.00, "cached_input": 0.20, "cache_write": 2.50, "output": 12.00},
     "gpt-5.6-luna": {"input": 0.20, "cached_input": 0.02, "cache_write": 0.25, "output": 1.20},
     "gpt-6-astra": {"input": 10.00, "cached_input": 1.00, "cache_write": 12.50, "output": 50.00},
 }
+RATE_FIELDS = ("input", "cached_input", "cache_write", "output")
 
 # A request whose input crosses this line is repriced as a whole: the input-side rates
 # double and the output rate rises by half. The band depends on input tokens alone and
@@ -90,51 +103,102 @@ def find_config():
 
 
 def load_config(config_path):
-    """Read the display switches and the Fast multiplier, with defaults."""
-    config = {"show": dict(DEFAULT_SHOW), "fast_multiplier": DEFAULT_FAST_MULTIPLIER}
+    """Read display switches, the Fast multiplier and model-rate overrides."""
+    config = {
+        "show": dict(DEFAULT_SHOW),
+        "fast_multiplier": DEFAULT_FAST_MULTIPLIER,
+        "model_rates": {model: dict(rates) for model, rates in MODEL_RATES.items()},
+    }
     try:
         with open(config_path, encoding="utf-8") as handle:
             raw = json.load(handle)
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return config
     if not isinstance(raw, dict):
         return config
     for key in config["show"]:
         if isinstance(raw.get(key), bool):
             config["show"][key] = raw[key]
-    multiplier = raw.get("fast_multiplier")
-    if isinstance(multiplier, (int, float)) and not isinstance(multiplier, bool) and multiplier > 0:
-        config["fast_multiplier"] = float(multiplier)
+    multiplier = finite_number(raw.get("fast_multiplier"))
+    if multiplier is not None and multiplier > 0:
+        config["fast_multiplier"] = multiplier
+
+    raw_rates = raw.get("model_rates")
+    if isinstance(raw_rates, dict):
+        for model, raw_rate in raw_rates.items():
+            if not isinstance(model, str) or not model.strip() or not isinstance(raw_rate, dict):
+                continue
+            model_name = model.strip().lower()
+            merged = dict(config["model_rates"].get(model_name, {}))
+            for field in RATE_FIELDS:
+                value = finite_number(raw_rate.get(field))
+                if value is not None and value >= 0:
+                    merged[field] = value
+            if all(field in merged for field in RATE_FIELDS):
+                config["model_rates"][model_name] = merged
     return config
+
+
+def finite_number(value):
+    """Return a finite numeric value, excluding booleans and invalid data."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        value = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def nonnegative_int(value):
+    """Return a non-negative integer, or zero for malformed transcript data."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(value, 0)
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return max(int(value), 0)
+    return 0
 
 
 def duration_ms(item):
     """Milliseconds from an item's `duration` field, or None when it has none."""
+    if not isinstance(item, dict):
+        return None
     duration = item.get("duration")
     if not isinstance(duration, dict):
         return None
-    secs = duration.get("secs") or 0
-    nanos = duration.get("nanos") or 0
-    return int(secs) * 1000 + int(nanos) // 1_000_000
-
-
-def rates_for(model):
-    """Price table entry for a model id, matching on any known name it contains."""
-    if not model:
+    if any(
+        key in duration
+        and not isinstance(duration[key], (int, float))
+        for key in ("secs", "nanos")
+    ):
         return None
+    secs = nonnegative_int(duration.get("secs", 0))
+    nanos = nonnegative_int(duration.get("nanos", 0))
+    return secs * 1000 + nanos // 1_000_000
+
+
+def rates_for(model, model_rates=None):
+    """Price table entry for a model id, matching on any known name it contains."""
+    if not isinstance(model, str) or not model:
+        return None
+    model_rates = MODEL_RATES if model_rates is None else model_rates
     lowered = model.lower()
-    for name, rates in MODEL_RATES.items():
+    for name in sorted(model_rates, key=len, reverse=True):
         if name in lowered:
-            return rates
+            return model_rates[name]
     return None
 
 
 def request_cost_usd(usage, rates):
     """Estimated USD for a single model request."""
-    inputs = usage.get("input_tokens") or 0
-    cached = usage.get("cached_input_tokens") or 0
-    cache_write = usage.get("cache_write_input_tokens") or 0
-    output = usage.get("output_tokens") or 0
+    if not isinstance(usage, dict):
+        return 0.0
+    inputs = nonnegative_int(usage.get("input_tokens", 0))
+    cached = nonnegative_int(usage.get("cached_input_tokens", 0))
+    cache_write = nonnegative_int(usage.get("cache_write_input_tokens", 0))
+    output = nonnegative_int(usage.get("output_tokens", 0))
     long_context = inputs > LONG_CONTEXT_TOKENS
     input_multiplier = LONG_CONTEXT_INPUT_MULTIPLIER if long_context else 1.0
     output_multiplier = LONG_CONTEXT_OUTPUT_MULTIPLIER if long_context else 1.0
@@ -150,13 +214,16 @@ def request_cost_usd(usage, rates):
     return per_million / 1_000_000
 
 
-def cost_usd(summary, fast_multiplier):
+def cost_usd(summary, fast_multiplier, model_rates=None):
     """Estimated USD for the turn, or None when the model has no known rates."""
-    rates = rates_for(summary["model"])
+    rates = rates_for(summary.get("model"), model_rates)
     if rates is None:
         return None
-    total = sum(request_cost_usd(usage, rates) for usage in summary["requests"])
-    if summary["fast"]:
+    requests = [usage for usage in summary.get("requests", []) if isinstance(usage, dict)]
+    if not requests:
+        return None
+    total = sum(request_cost_usd(usage, rates) for usage in requests)
+    if summary.get("fast", False):
         total *= fast_multiplier
     return total
 
@@ -186,6 +253,8 @@ def measure(transcript_path, turn_id):
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(entry, dict):
+                continue
             payload = entry.get("payload")
             if not isinstance(payload, dict):
                 continue
@@ -193,7 +262,8 @@ def measure(transcript_path, turn_id):
 
             if entry_type == "event_msg" and payload.get("type") == "thread_settings_applied":
                 settings = payload.get("thread_settings") or {}
-                tier = settings.get("service_tier")
+                if isinstance(settings, dict):
+                    tier = settings.get("service_tier")
                 continue
 
             if entry_type == "turn_context" and payload.get("turn_id") == turn_id:
@@ -212,12 +282,16 @@ def measure(transcript_path, turn_id):
                     summary["requests"].append(request_usage)
                 # turn_token_usage is cumulative, so keep the largest seen.
                 turn_usage = payload.get("turn_token_usage") or {}
-                if (turn_usage.get("output_tokens") or 0) >= (
-                    summary["usage"].get("output_tokens") or 0
+                if not isinstance(turn_usage, dict):
+                    continue
+                if nonnegative_int(turn_usage.get("output_tokens", 0)) >= nonnegative_int(
+                    summary["usage"].get("output_tokens", 0)
                 ):
                     summary["usage"] = turn_usage
             elif entry_type == "event_msg" and payload.get("type") == "item_completed":
                 item = payload.get("item") or {}
+                if not isinstance(item, dict):
+                    continue
                 item_type = item.get("type")
                 started = payload.get("started_at_ms")
                 completed = payload.get("completed_at_ms")
@@ -242,10 +316,10 @@ def format_usd(amount):
     return f"${amount:.2f}"
 
 
-def format_line(summary, show, fast_multiplier):
-    usage = summary["usage"]
-    window_ms = summary["window_ms"]
-    tokens = usage.get("output_tokens") or 0
+def format_line(summary, show, fast_multiplier, model_rates=None):
+    usage = summary.get("usage") if isinstance(summary.get("usage"), dict) else {}
+    window_ms = nonnegative_int(summary.get("window_ms", 0))
+    tokens = nonnegative_int(usage.get("output_tokens", 0))
     parts = []
 
     # The rate is the only segment that can be unmeasurable, so it alone is gated;
@@ -253,7 +327,7 @@ def format_line(summary, show, fast_multiplier):
     if show["tps"] and window_ms >= MIN_WINDOW_MS:
         parts.append(f"{round(tokens * 1000 / window_ms)} tps")
 
-    reasoning = usage.get("reasoning_output_tokens") or 0
+    reasoning = nonnegative_int(usage.get("reasoning_output_tokens", 0))
     share_pct = round(reasoning * 100 / tokens) if tokens and reasoning else None
 
     if show["output_tokens"]:
@@ -266,21 +340,23 @@ def format_line(summary, show, fast_multiplier):
         # Otherwise it stands alone, so its switch is never inert.
         parts.append(f"reasoning {share_pct}%")
 
-    inputs = usage.get("input_tokens") or 0
+    inputs = nonnegative_int(usage.get("input_tokens", 0))
     if show["cache_hit"] and inputs:
-        cached = usage.get("cached_input_tokens") or 0
+        cached = min(nonnegative_int(usage.get("cached_input_tokens", 0)), inputs)
         parts.append(f"CacheHit {round(cached * 100 / inputs)}%")
 
-    if show["tools"] and summary["tool_calls"]:
+    tool_calls = nonnegative_int(summary.get("tool_calls", 0))
+    tool_ms = nonnegative_int(summary.get("tool_ms", 0))
+    if show["tools"] and tool_calls:
         # Some tool items carry no usable timing (e.g. FileChange spans a few ms), so
         # report the count on its own rather than a misleading "0.0s".
-        if summary["tool_ms"] >= MIN_TOOL_MS:
-            parts.append(f"Tools {summary['tool_calls']} {summary['tool_ms'] / 1000:.1f}s")
+        if tool_ms >= MIN_TOOL_MS:
+            parts.append(f"Tools {tool_calls} {tool_ms / 1000:.1f}s")
         else:
-            parts.append(f"Tools {summary['tool_calls']}")
+            parts.append(f"Tools {tool_calls}")
 
     if show["cost"]:
-        amount = cost_usd(summary, fast_multiplier)
+        amount = cost_usd(summary, fast_multiplier, model_rates)
         if amount is not None:
             parts.append(format_usd(amount))
 
@@ -294,18 +370,26 @@ def main():
         hook_input = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return
+    if not isinstance(hook_input, dict):
+        return
     transcript_path = hook_input.get("transcript_path")
     turn_id = hook_input.get("turn_id")
     if not transcript_path or not turn_id:
         return
     try:
         summary = measure(transcript_path, turn_id)
-    except OSError:
+    except (OSError, UnicodeError, TypeError, ValueError):
         return
-    if (summary["usage"].get("output_tokens") or 0) <= 0:
+    usage = summary.get("usage")
+    if not isinstance(usage, dict) or nonnegative_int(usage.get("output_tokens", 0)) <= 0:
         return
 
-    line = format_line(summary, config["show"], config["fast_multiplier"])
+    line = format_line(
+        summary,
+        config["show"],
+        config["fast_multiplier"],
+        config["model_rates"],
+    )
     if not line:
         return
     json.dump({"systemMessage": line}, sys.stdout, ensure_ascii=False)

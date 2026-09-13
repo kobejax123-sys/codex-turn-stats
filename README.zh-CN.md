@@ -90,7 +90,15 @@ cp turn_stats.json "$CODEX_HOME/plugins/data/turn-stats-codex-turn-stats/"
   "cache_hit": true,
   "tools": true,
   "cost": true,
-  "fast_multiplier": 2.0
+  "fast_multiplier": 2.0,
+  "model_rates": {
+    "gpt-5.6-luna": {
+      "input": 0.2,
+      "cached_input": 0.02,
+      "cache_write": 0.25,
+      "output": 1.2
+    }
+  }
 }
 ```
 
@@ -103,6 +111,7 @@ cp turn_stats.json "$CODEX_HOME/plugins/data/turn-stats-codex-turn-stats/"
 | `tools` | 工具调用次数与耗时 | `Tools 7 3.2s` |
 | `cost` | 预估 API 费用 | `$0.0592` |
 | `fast_multiplier` | Fast 服务层级下的费用倍数 | `2.0` |
+| `model_rates` | 每百万 token 的模型费率；可覆盖或扩展内置费率 | `{ "gpt-5.5": { ... } }` |
 
 说明：
 
@@ -110,6 +119,10 @@ cp turn_stats.json "$CODEX_HOME/plugins/data/turn-stats-codex-turn-stats/"
 - 关闭 `output_tokens` 时，`reasoning_share` 会独立显示为 `reasoning 71%`，
   开关不会失效。
 - `fast_multiplier` 在该轮使用 Fast 服务层级时用于放大费用。
+- `model_rates` 使用 `input`、`cached_input`、`cache_write`、`output` 四项美元/百万
+  token 费率。模型键按不区分大小写的子串匹配，匹配到的键中较长者优先。本仓库模板
+  已包含内置费率；要新增或覆盖费率，请修改数据目录中的副本。新增模型必须提供四项
+  费率，已有模型则可以只覆盖发生变化的字段。
 
 ## 计算方式
 
@@ -136,8 +149,8 @@ hook 在每轮结束时触发一次，事件为 `Stop`，读取 Codex 传入的�
 
 **这是估算值，不是账单金额。** 价格来自第三方整理，而非第一方接口，会随官方
 调价而变化，也没有考虑你账号上的任何折扣、赠金或企业协议。要按自己的费率计算，
-修改 `hooks/turn_stats.py` 中的 `MODEL_RATES` 即可。没有匹配到费率的模型会
-完全不显示费用，而不是给出一个猜测值。
+请修改数据目录副本 `turn_stats.json` 中的 `model_rates`，不要编辑插件脚本。没有
+匹配到费率的模型会完全不显示费用，而不是给出一个猜测值。
 
 ## 已知限制
 
