@@ -259,7 +259,7 @@ def format_line(summary, show, fast_multiplier):
     if show["output_tokens"]:
         # With the token count shown, the share rides along as a parenthetical.
         head = f"{tokens} out"
-        if share_pct is not None:
+        if show["reasoning_share"] and share_pct is not None:
             head += f" ({share_pct}% reasoning)"
         parts.append(head)
     elif show["reasoning_share"] and share_pct is not None:
