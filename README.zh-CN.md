@@ -60,7 +60,7 @@ Hooks can run outside the sandbox after you trust them.
 
 | 段 | 含义 |
 |---|---|
-| `148 tps` | 输出 token 数除以模型实际生成它们所花的时间 |
+| `148 tps` | 估算的输出速度：输出 token 数除以 transcript 中记录的生成项时长 |
 | `965 out` | 该轮的输出 token 总数，跨请求累加 |
 | `(71% reasoning)` | 输出 token 中思考 token 的占比 |
 | `CacheHit 90%` | 缓存命中的输入 token 占总输入 token 的比例 |
@@ -115,7 +115,8 @@ cp turn_stats.json "$CODEX_HOME/plugins/data/turn-stats-codex-turn-stats/"
 
 说明：
 
-- 生成窗口不足 500 ms 时不显示 `tps`，窗口太短，其中的速率没有参考价值。
+- `tps` 是基于 transcript 时间戳的估算值，不是模型服务商直接报告的速度。生成窗口不足
+  500 ms 时不显示 `tps`，窗口太短，其中的速率没有参考价值。
 - 关闭 `output_tokens` 时，`reasoning_share` 会独立显示为 `reasoning 71%`，
   开关不会失效。
 - `fast_multiplier` 在该轮使用 Fast 服务层级时用于放大费用。
@@ -129,9 +130,9 @@ cp turn_stats.json "$CODEX_HOME/plugins/data/turn-stats-codex-turn-stats/"
 hook 在每轮结束时触发一次，事件为 `Stop`，读取 Codex 传入的会话记录
 （transcript）。所有数值都取自记录中已有的内容，不做任何推测性测量。
 
-- **`tps`** —— 输出 token 数除以各个生成项从开始到完成的时间跨度。工具调用和
-  等待批准的时间不计入，因此它反映的是模型速度，而非墙钟速度。若该轮没有任何
-  流式生成，则省略速率，而不是报 0。
+- **`tps`** —— 估算的输出速度，即输出 token 数除以各个生成项从开始到完成的时间跨度。
+  工具调用和等待批准的时间不计入，因此它反映的是估算的模型生成速度，而非墙钟速度。
+  若该轮没有任何流式生成，则省略速率，而不是报 0。
 - **`CacheHit`** —— 该轮的 `cached_input_tokens / input_tokens`。
 - **`cost`** —— 按请求逐条累加，因为长上下文档位是按请求而非按轮判定的。输入
   超过 272,000 token 的请求会整体重新计价：输入侧费率翻倍，输出费率上浮一半。
