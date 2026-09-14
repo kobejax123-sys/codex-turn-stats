@@ -123,6 +123,8 @@ Notes:
 - `tps` is an estimate based on transcript timestamps, not a provider-reported
   measurement. It is dropped when the turn's generation window is under 500 ms,
   because a window that short carries no rate information.
+- When it appears, the `↑` after `tps` indicates that at least one generation
+  item lacked a usable start or completion timestamp, so the estimate may be high.
 - `reasoning_share` renders on its own as `reasoning 71%` when `output_tokens`
   is off, so the switch is never inert.
 - `fast_multiplier` scales the cost when the turn ran on the Fast service tier.
@@ -141,9 +143,10 @@ all come from what the transcript already recorded.
 
 - **`tps`** — an estimate of output tokens over the span from each generation
   item's start to its completion. Tool calls and approval waits are excluded,
-  so this is model generation speed rather than wall-clock speed. If a turn
-  contained no streamed generation, the rate is omitted rather than reported as
-  zero.
+  so this is model generation speed rather than wall-clock speed. If any
+  generation item lacks a usable timestamp, `↑` is appended to the rate. If a
+  turn contained no streamed generation, the rate is omitted rather than
+  reported as zero.
 - **`CacheHit`** — `cached_input_tokens / input_tokens` for the turn.
 - **`cost`** — summed per request, because the long-context band is decided per
   request rather than per turn. A request whose input exceeds 272,000 tokens is

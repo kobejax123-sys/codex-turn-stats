@@ -124,6 +124,15 @@ class MeasureTests(TranscriptTestCase):
                         "turn_token_usage": {"output_tokens": 30},
                     },
                 },
+                {
+                    "type": "event_msg",
+                    "payload": {
+                        "turn_id": "turn-1",
+                        "type": "item_completed",
+                        "completed_at_ms": 1000,
+                        "item": {"type": "Reasoning"},
+                    },
+                },
                 {"type": "event_msg", "payload": {"turn_id": "turn-1", "type": "item_completed", "item": "bad"}},
                 "{}\n",
             ]
@@ -135,6 +144,7 @@ class MeasureTests(TranscriptTestCase):
         self.assertEqual(len(summary["requests"]), 2)
         self.assertEqual(summary["window_ms"], 0)
         self.assertEqual(summary["tool_calls"], 0)
+        self.assertFalse(summary["generation_timing_complete"])
 
 
 class CalculationTests(unittest.TestCase):
@@ -188,6 +198,24 @@ class CalculationTests(unittest.TestCase):
         line = turn_stats.format_line(summary, show, 2.0, turn_stats.MODEL_RATES)
 
         self.assertEqual(line, "10 out (40% reasoning) · CacheHit 50%")
+
+    def test_format_line_marks_tps_when_generation_timing_is_incomplete(self):
+        summary = {
+            "usage": {"output_tokens": 100},
+            "requests": [],
+            "window_ms": 1000,
+            "generation_timing_complete": False,
+            "tool_calls": 0,
+            "tool_ms": 0,
+            "model": None,
+            "fast": False,
+        }
+        show = {key: False for key in turn_stats.DEFAULT_SHOW}
+        show["tps"] = True
+
+        self.assertEqual(turn_stats.format_line(summary, show, 2.0), "100 tps↑")
+        summary["generation_timing_complete"] = True
+        self.assertEqual(turn_stats.format_line(summary, show, 2.0), "100 tps")
 
     def test_reasoning_share_stands_alone_when_output_tokens_are_hidden(self):
         summary = {

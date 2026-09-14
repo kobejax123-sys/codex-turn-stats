@@ -236,6 +236,7 @@ def measure(transcript_path, turn_id):
         # accumulated from these rather than from the cumulative turn totals.
         "requests": [],
         "window_ms": 0,
+        "generation_timing_complete": True,
         "tool_calls": 0,
         "tool_ms": 0,
         "model": None,
@@ -301,7 +302,14 @@ def measure(transcript_path, turn_id):
                     else 0
                 )
                 if item_type in GEN_ITEM_TYPES:
-                    summary["window_ms"] += span
+                    if not (
+                        isinstance(started, int)
+                        and isinstance(completed, int)
+                        and completed >= started
+                    ):
+                        summary["generation_timing_complete"] = False
+                    else:
+                        summary["window_ms"] += span
                 elif item_type in TOOL_ITEM_TYPES:
                     summary["tool_calls"] += 1
                     summary["tool_ms"] += duration_ms(item) or span
@@ -325,7 +333,8 @@ def format_line(summary, show, fast_multiplier, model_rates=None):
     # The rate is the only segment that can be unmeasurable, so it alone is gated;
     # the remaining counts are exact and stay worth showing either way.
     if show["tps"] and window_ms >= MIN_WINDOW_MS:
-        parts.append(f"{round(tokens * 1000 / window_ms)} tps")
+        estimate_marker = "↑" if summary.get("generation_timing_complete", True) is False else ""
+        parts.append(f"{round(tokens * 1000 / window_ms)} tps{estimate_marker}")
 
     reasoning = nonnegative_int(usage.get("reasoning_output_tokens", 0))
     share_pct = round(reasoning * 100 / tokens) if tokens and reasoning else None
